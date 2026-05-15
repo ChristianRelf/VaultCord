@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ┌─────────────────────────────────────────────────┐
-│  VAULTCORD v2.0 — Discord Archive Toolkit       │
+│  VAULTCORD v2.0 - Discord Archive Toolkit       │
 └─────────────────────────────────────────────────┘
 
 High-performance Discord server archiver with 13 export tools.
@@ -1188,8 +1188,6 @@ def build_html(data):
         categories[cat_id].sort(key=lambda c: c.get("position", 0))
     uncategorized.sort(key=lambda c: c.get("position", 0))
 
-    ch_lookup = {ch["id"]: ch["name"] for ch in channels}
-
     user_lookup = {}
     for m in members:
         u = m.get("user", {})
@@ -1362,6 +1360,38 @@ body {{
     .main {{ padding:16px 14px 36px; }}
     .stats-bar {{ flex-direction:column; }}
 }}
+
+/* Virtual list */
+#vl-viewport {{ height:calc(100vh - 220px); min-height:300px; overflow-y:auto; position:relative; border:1px solid var(--border); border-radius:var(--radius); }}
+#vl-inner    {{ position:relative; }}
+#vl-empty    {{ padding:40px; text-align:center; color:var(--text-muted); font-size:0.9rem; }}
+.vl-item     {{ position:absolute; left:0; right:0; padding:0 2px; }}
+
+/* Channel msg header (override existing to add date input layout) */
+.channel-msg-header {{ display:flex; align-items:center; gap:8px; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border); }}
+#jump-date-input {{ margin-left:auto; padding:4px 8px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-size:0.75rem; color-scheme:dark; cursor:pointer; }}
+#jump-date-input:focus {{ border-color:var(--accent); outline:none; }}
+
+/* Collapsible sidebar categories */
+.cat-header  {{ display:flex; align-items:center; gap:5px; padding:4px 10px; margin-top:6px; cursor:pointer; user-select:none; font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); }}
+.cat-header:hover {{ color:var(--text); }}
+.cat-arrow   {{ font-size:0.55rem; transition:transform .15s; display:inline-block; flex-shrink:0; }}
+.cat-section.collapsed .cat-arrow    {{ transform:rotate(-90deg); }}
+.cat-section.collapsed .cat-channels {{ display:none; }}
+.nav-link.active {{ background:var(--bg-hover); color:var(--text); }}
+
+/* Global search overlay */
+#search-overlay {{ position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:1000; display:flex; align-items:flex-start; justify-content:center; padding-top:80px; }}
+#search-modal   {{ background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); width:min(700px,90vw); max-height:70vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.5); }}
+#search-input   {{ padding:12px 16px; background:transparent; border:none; border-bottom:1px solid var(--border); color:var(--text); font-size:.9rem; outline:none; font-family:inherit; }}
+#search-results {{ overflow-y:auto; flex:1; }}
+.search-result  {{ padding:10px 16px; border-bottom:1px solid var(--border); cursor:pointer; font-size:.82rem; }}
+.search-result:hover {{ background:var(--bg-hover); }}
+.sr-channel {{ color:var(--accent); font-size:.72rem; margin-bottom:2px; }}
+.sr-author  {{ font-weight:600; }}
+.sr-ts      {{ color:var(--text-muted); font-size:.68rem; margin-left:6px; }}
+.sr-content {{ color:var(--text-dim); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }}
+.sr-empty   {{ padding:24px; text-align:center; color:var(--text-muted); font-size:0.85rem; }}
 </style>
 </head>
 <body>
@@ -1393,20 +1423,61 @@ body {{
     <a class="nav-link" href="#members"><span class="icon">👥</span> Members <span class="badge">{len(members)}</span></a>
     <a class="nav-link" href="#emojis"><span class="icon">😀</span> Emojis <span class="badge">{len(emojis)}</span></a>
     <a class="nav-link" href="#messages"><span class="icon">💬</span> Messages <span class="badge">{total_messages}</span></a>
+    <a class="nav-link" onclick="openSearch();return false;" href="#" style="cursor:pointer;"><span class="icon">🔍</span> Search</a>
 """)
 
-    text_ch_with_msgs = [(ch_id, ch_lookup.get(ch_id, ch_id)) for ch_id in messages if messages[ch_id]]
-    if text_ch_with_msgs:
-        html_parts.append('    <div class="nav-section-title" style="margin-top:10px;">Channels</div>')
-        for ch_id, ch_name in sorted(text_ch_with_msgs, key=lambda x: x[1]):
-            count = len(messages[ch_id])
-            html_parts.append(
-                f'    <a class="nav-link" href="#ch-{ch_id}">'
-                f'<span class="icon">#</span> {escape(ch_name)} '
-                f'<span class="badge">{count}</span></a>'
+    msgs_ch_ids = {ch_id for ch_id, msgs_list in messages.items() if msgs_list}
+    if msgs_ch_ids:
+        html_parts.append('    <div class="nav-section-title" style="margin-top:6px;">Channels</div>')
+
+        def _sidebar_ch_link(ch):
+            ch_id = ch["id"]
+            count = len(messages.get(ch_id, []))
+            icon = "#" if ch.get("type") in {0, 5, 15} else "🔊"
+            safe_id = ch_id.replace("'", "\\'")
+            return (
+                f'    <a class="nav-link ch-link" data-ch-id="{ch_id}"'
+                f' onclick="switchChannel(\'{safe_id}\');return false;" href="#">'
+                f'<span class="icon">{icon}</span> {escape(ch["name"])}'
+                f' <span class="badge">{count}</span></a>'
             )
 
-    html_parts.append("  </nav>\n</aside>")
+        sorted_cat_ids = sorted(
+            categories.keys(),
+            key=lambda cid: next((c["position"] for c in channels if c["id"] == cid), 0)
+        )
+
+        unc_with_msgs = [ch for ch in uncategorized if ch["id"] in msgs_ch_ids]
+        if unc_with_msgs:
+            html_parts.append('<div class="cat-section" data-cat-id="__unc__">')
+            html_parts.append('  <div class="cat-header" onclick="toggleCat(\'__unc__\')">')
+            html_parts.append('    <span class="cat-arrow">▾</span><span>No Category</span>')
+            html_parts.append('  </div><div class="cat-channels">')
+            for ch in unc_with_msgs:
+                html_parts.append(_sidebar_ch_link(ch))
+            html_parts.append('  </div></div>')
+
+        for cat_id in sorted_cat_ids:
+            cat_chs_with_msgs = [ch for ch in categories[cat_id] if ch["id"] in msgs_ch_ids]
+            if not cat_chs_with_msgs:
+                continue
+            safe_cat = cat_id.replace("'", "\\'")
+            html_parts.append(f'<div class="cat-section" data-cat-id="{cat_id}">')
+            html_parts.append(f'  <div class="cat-header" onclick="toggleCat(\'{safe_cat}\')">')
+            html_parts.append(f'    <span class="cat-arrow">▾</span><span>{escape(cat_names.get(cat_id, ""))}</span>')
+            html_parts.append('  </div><div class="cat-channels">')
+            for ch in cat_chs_with_msgs:
+                html_parts.append(_sidebar_ch_link(ch))
+            html_parts.append('  </div></div>')
+
+    html_parts.append(
+        '  </nav>\n</aside>\n'
+        '<div id="search-overlay" style="display:none" onclick="if(event.target===this)closeSearch()">'
+        '<div id="search-modal">'
+        '<input id="search-input" type="text" placeholder="Search all channels…" autocomplete="off">'
+        '<div id="search-results"><div class="sr-empty">Type to search messages…</div></div>'
+        '</div></div>'
+    )
 
     # ─── Main content ────────────────────────────────────────────────────
 
@@ -1514,92 +1585,85 @@ body {{
             html_parts.append(f'<div class="emoji-item"><img src="{url}" alt=":{ename}:" loading="lazy"><span class="emoji-name">:{ename}:</span></div>')
         html_parts.append('</div></section>')
 
-    # Messages
+    # Messages — static shell (content rendered by JS virtual list)
     html_parts.append("""
 <section id="messages" class="section">
   <h2 class="section-title">💬 Messages</h2>
   <p class="section-subtitle">Message history from accessible text channels</p>
-  <input type="text" class="search-box" placeholder="Search messages…" oninput="filterMessages(this.value)">
+  <div id="msg-channel-header" class="channel-msg-header" style="display:none">
+    <span class="ch-hash">#</span>
+    <h3 id="msg-channel-name"></h3>
+    <span id="msg-channel-count" class="count"></span>
+    <input type="date" id="jump-date-input" title="Jump to date">
+  </div>
+  <div id="vl-viewport"><div id="vl-inner"></div></div>
+  <div id="vl-empty">Select a channel from the sidebar</div>
+</section>
 """)
 
-    for ch_id, msgs in messages.items():
-        if not msgs:
+    # Build VDATA — users dict (deduplicated), channels list, slim messages dict
+    vd_users = {}
+    for _msgs_list in messages.values():
+        for _msg in _msgs_list:
+            _au = _msg.get("author") or {}
+            _uid = _au.get("id", "")
+            if _uid and _uid not in vd_users:
+                vd_users[_uid] = {
+                    "n": _au.get("global_name") or _au.get("username", "?"),
+                    "av": _au.get("avatar") or ""
+                }
+
+    sorted_cat_ids_vd = sorted(
+        categories.keys(),
+        key=lambda cid: next((c["position"] for c in channels if c["id"] == cid), 0)
+    )
+    vd_channels = []
+    for _ch in uncategorized:
+        if _ch["id"] in messages and messages[_ch["id"]]:
+            vd_channels.append({"id": _ch["id"], "name": _ch["name"], "cat": "", "catId": ""})
+    for _cid in sorted_cat_ids_vd:
+        for _ch in categories[_cid]:
+            if _ch["id"] in messages and messages[_ch["id"]]:
+                vd_channels.append({"id": _ch["id"], "name": _ch["name"],
+                                    "cat": cat_names.get(_cid, ""), "catId": _cid})
+
+    vd_messages = {}
+    for ch_id, msgs_list in messages.items():
+        if not msgs_list:
             continue
-        ch_name = escape(ch_lookup.get(ch_id, ch_id))
-        msgs_sorted = sorted(msgs, key=lambda m: m.get("timestamp", ""))
+        msgs_sorted = sorted(msgs_list, key=lambda m: m.get("timestamp", ""))
+        entries = []
+        for _msg in msgs_sorted:
+            _au = _msg.get("author") or {}
+            _entry = {
+                "id": _msg.get("id", ""),
+                "uid": _au.get("id", ""),
+                "ts": format_timestamp(_msg.get("timestamp")),
+                "c": _msg.get("content", ""),
+            }
+            _atts = _msg.get("attachments")
+            if _atts:
+                _entry["a"] = [{"url": a.get("url", ""), "fn": a.get("filename", "file"),
+                                 "sz": a.get("size", 0)} for a in _atts]
+            _embs = _msg.get("embeds")
+            if _embs:
+                _el = [{"t": e.get("title", ""), "d": e.get("description", ""),
+                        "col": e.get("color", 0)}
+                       for e in _embs if e.get("title") or e.get("description")]
+                if _el:
+                    _entry["e"] = _el
+            _tr = _msg.get("_translation")
+            if _tr:
+                _entry["tr"] = _tr
+                _entry["tl"] = _msg.get("_detected_lang", "")
+            entries.append(_entry)
+        vd_messages[ch_id] = entries
 
-        html_parts.append(
-            f'<div class="channel-messages" id="ch-{ch_id}">'
-            f'<div class="channel-msg-header"><span class="ch-hash">#</span>'
-            f'<h3>{ch_name}</h3><span class="count">{len(msgs_sorted)} messages</span></div>'
-        )
-
-        # Pre-cache author info to avoid repeated escape() calls for the same user
-        _author_cache = {}
-
-        # Build all messages as a single joined string for this channel
-        msg_html_parts = []
-        _ap = msg_html_parts.append  # Local reference is faster in tight loops
-
-        for msg in msgs_sorted:
-            author = msg.get("author") or {}
-            author_id = author.get("id", "")
-
-            # Cache escaped author name + avatar html per user ID
-            if author_id not in _author_cache:
-                aname = escape(author.get("global_name") or author.get("username", "Unknown"))
-                av = author.get("avatar")
-                if av:
-                    av_html = f'<img src="https://cdn.discordapp.com/avatars/{author_id}/{av}.png?size=64" alt="">'
-                else:
-                    av_html = aname[0].upper() if aname else "?"
-                _author_cache[author_id] = (aname, av_html)
-
-            aname, av_html = _author_cache[author_id]
-            ts = format_timestamp(msg.get("timestamp"))
-            raw_content = msg.get("content", "")
-            content = escape(raw_content) if raw_content else ""
-
-            _ap(f'<div class="message" data-content="{escape(raw_content.lower()) if raw_content else ""}">'
-                f'<div class="msg-avatar">{av_html}</div><div class="msg-body">'
-                f'<div class="msg-header"><span class="msg-author">{aname}</span>'
-                f'<span class="msg-timestamp">{ts}</span></div>')
-
-            if content:
-                _ap(f'<div class="msg-content">{content}</div>')
-
-            tr = msg.get("_translation")
-            if tr:
-                _ap(f'<div class="msg-translation">(Translated from {escape(lang_name(msg.get("_detected_lang", "")))}:&#32;{escape(tr)})</div>')
-
-            atts = msg.get("attachments")
-            if atts:
-                _ap('<div class="msg-attachments">')
-                for att in atts:
-                    sz = att.get("size", 0)
-                    _ap(f'<a class="msg-attachment" href="{att.get("url", "#")}" target="_blank">'
-                        f'📎 {escape(att.get("filename", "file"))} '
-                        f'({"%.0f KB" % (sz/1024) if sz < 1048576 else "%.1f MB" % (sz/1048576)})</a>')
-                _ap('</div>')
-
-            embs = msg.get("embeds")
-            if embs:
-                for emb in embs:
-                    et = emb.get("title") or ""
-                    ed = emb.get("description") or ""
-                    if et or ed:
-                        ec = emb.get("color")
-                        _ap(f'<div class="msg-embed"'
-                            f'{" style=border-left-color:" + role_color_css(ec) if ec else ""}>'
-                            f'{"<div class=embed-title>" + escape(et) + "</div>" if et else ""}'
-                            f'{"<div class=embed-desc>" + escape(ed) + "</div>" if ed else ""}</div>')
-
-            _ap('</div></div>')
-
-        html_parts.append("".join(msg_html_parts))
-        html_parts.append('</div>')
-
-    html_parts.append('</section>')
+    _vdata_json = json.dumps(
+        {"users": vd_users, "channels": vd_channels, "messages": vd_messages},
+        ensure_ascii=False, separators=(',', ':')
+    )
+    html_parts.append(f'<script>const VDATA={_vdata_json};</script>')
 
     # Footer
     html_parts.append(f"""
@@ -1617,25 +1681,291 @@ body {{
 
     html_parts.append("""
 <script>
+// ── Utilities ────────────────────────────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtSize(b) {
+  return b < 1048576 ? Math.round(b/1024) + ' KB' : (b/1048576).toFixed(1) + ' MB';
+}
+const LANG_NAMES = {
+  af:'Afrikaans',sq:'Albanian',ar:'Arabic',hy:'Armenian',az:'Azerbaijani',eu:'Basque',
+  be:'Belarusian',bn:'Bengali',bs:'Bosnian',bg:'Bulgarian',ca:'Catalan',zh:'Chinese',
+  hr:'Croatian',cs:'Czech',da:'Danish',nl:'Dutch',et:'Estonian',fi:'Finnish',fr:'French',
+  gl:'Galician',ka:'Georgian',de:'German',el:'Greek',gu:'Gujarati',ht:'Haitian Creole',
+  he:'Hebrew',hi:'Hindi',hu:'Hungarian',is:'Icelandic',id:'Indonesian',ga:'Irish',
+  it:'Italian',ja:'Japanese',kn:'Kannada',kk:'Kazakh',ko:'Korean',ky:'Kyrgyz',lo:'Lao',
+  la:'Latin',lv:'Latvian',lt:'Lithuanian',mk:'Macedonian',ms:'Malay',ml:'Malayalam',
+  mt:'Maltese',mn:'Mongolian',ne:'Nepali',no:'Norwegian',fa:'Persian',pl:'Polish',
+  pt:'Portuguese',pa:'Punjabi',ro:'Romanian',ru:'Russian',sr:'Serbian',sk:'Slovak',
+  sl:'Slovenian',es:'Spanish',sw:'Swahili',sv:'Swedish',ta:'Tamil',te:'Telugu',
+  th:'Thai',tr:'Turkish',uk:'Ukrainian',ur:'Urdu',uz:'Uzbek',vi:'Vietnamese',
+  cy:'Welsh',yi:'Yiddish'
+};
+function langName(code) {
+  if (!code) return 'Unknown';
+  return LANG_NAMES[code] || LANG_NAMES[code.split('-')[0]] || code.toUpperCase();
+}
+
+// ── Virtual list state ───────────────────────────────────────────────────────
+let activeCh = null;
+const vlHeights = {};
+const vlOffsets = {};
+const rendered  = new Map(); // idx -> DOM element
+const OVERSCAN  = 6;
+const BASE_H    = 58;
+const LINE_H    = 19;
+const CPL       = 72;   // chars per line estimate
+const ATT_H     = 24;
+const EMB_H     = 46;
+const TR_H      = 22;
+
+const vlViewport = document.getElementById('vl-viewport');
+const vlInner    = document.getElementById('vl-inner');
+const vlEmpty    = document.getElementById('vl-empty');
+
+function estimateH(msg) {
+  let h = BASE_H;
+  const c = msg.c || '';
+  if (c) h += Math.max(0, Math.ceil(c.length / CPL) - 1) * LINE_H;
+  if (msg.a && msg.a.length) h += ATT_H * Math.ceil(msg.a.length / 3);
+  if (msg.e && msg.e.length) {
+    for (const e of msg.e) h += EMB_H + Math.ceil(((e.t||'').length + (e.d||'').length) / CPL) * LINE_H;
+  }
+  if (msg.tr) h += TR_H + Math.ceil(msg.tr.length / CPL) * LINE_H;
+  return h;
+}
+
+function buildOffsets(chId) {
+  const msgs = VDATA.messages[chId];
+  if (!msgs) return;
+  const n = msgs.length;
+  const h = new Float32Array(n);
+  const o = new Float32Array(n + 1);
+  for (let i = 0; i < n; i++) { h[i] = estimateH(msgs[i]); o[i+1] = o[i] + h[i]; }
+  vlHeights[chId] = h;
+  vlOffsets[chId] = o;
+}
+
+function bsFirst(offsets, scrollTop) {
+  let lo = 0, hi = offsets.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid + 1] <= scrollTop) lo = mid + 1; else hi = mid;
+  }
+  return lo;
+}
+function bsLast(offsets, scrollBottom) {
+  let lo = 0, hi = offsets.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] < scrollBottom) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+function renderMsgHtml(msg) {
+  const u = VDATA.users[msg.uid] || {n:'Unknown', av:''};
+  const name = escapeHtml(u.n);
+  const av = u.av
+    ? '<img src="https://cdn.discordapp.com/avatars/' + escapeHtml(msg.uid) + '/' + escapeHtml(u.av) + '.png?size=64" alt="">'
+    : escapeHtml((u.n||'?')[0].toUpperCase());
+  let h = '<div class="msg-avatar">' + av + '</div><div class="msg-body">';
+  h += '<div class="msg-header"><span class="msg-author">' + name + '</span>'
+     + '<span class="msg-timestamp">' + escapeHtml(msg.ts) + '</span></div>';
+  if (msg.c) h += '<div class="msg-content">' + escapeHtml(msg.c) + '</div>';
+  if (msg.tr) h += '<div class="msg-translation">(Translated from ' + escapeHtml(langName(msg.tl)) + ': ' + escapeHtml(msg.tr) + ')</div>';
+  if (msg.a && msg.a.length) {
+    h += '<div class="msg-attachments">';
+    for (const a of msg.a) h += '<a class="msg-attachment" href="' + escapeHtml(a.url) + '" target="_blank">📎 ' + escapeHtml(a.fn) + ' (' + fmtSize(a.sz) + ')</a>';
+    h += '</div>';
+  }
+  if (msg.e && msg.e.length) {
+    for (const e of msg.e) {
+      const col = e.col ? ' style="border-left-color:#' + (e.col >>> 0).toString(16).padStart(6,'0') + '"' : '';
+      h += '<div class="msg-embed"' + col + '>';
+      if (e.t) h += '<div class="embed-title">' + escapeHtml(e.t) + '</div>';
+      if (e.d) h += '<div class="embed-desc">' + escapeHtml(e.d) + '</div>';
+      h += '</div>';
+    }
+  }
+  h += '</div>';
+  return h;
+}
+
+function measureItem(idx, el) {
+  if (!activeCh) return;
+  const h = vlHeights[activeCh], o = vlOffsets[activeCh];
+  if (!h || idx >= h.length) return;
+  const actual = el.getBoundingClientRect().height;
+  if (actual <= 1 || Math.abs(actual - h[idx]) <= 2) return;
+  const firstVis = bsFirst(o, vlViewport.scrollTop);
+  const topOff   = vlViewport.scrollTop - o[firstVis];
+  h[idx] = actual;
+  const n = h.length;
+  for (let i = idx; i < n; i++) o[i+1] = o[i] + h[i];
+  vlInner.style.height = o[n] + 'px';
+  for (const [ri, rel] of rendered) { if (ri >= idx) rel.style.top = o[ri] + 'px'; }
+  if (idx < firstVis) vlViewport.scrollTop = o[firstVis] + topOff;
+}
+
+let rafPending = false;
+function scheduleRender() {
+  if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; renderWindow(); }); }
+}
+
+function renderWindow() {
+  if (!activeCh) return;
+  const msgs = VDATA.messages[activeCh];
+  if (!msgs || !msgs.length) return;
+  const o = vlOffsets[activeCh];
+  const scrollTop = vlViewport.scrollTop;
+  const viewH    = vlViewport.clientHeight;
+  const first = Math.max(0, bsFirst(o, scrollTop) - OVERSCAN);
+  const last  = Math.min(msgs.length - 1, bsLast(o, scrollTop + viewH) + OVERSCAN);
+
+  for (const [idx, el] of rendered) {
+    if (idx < first || idx > last) { el.remove(); rendered.delete(idx); }
+  }
+  for (let i = first; i <= last; i++) {
+    if (rendered.has(i)) continue;
+    const el = document.createElement('div');
+    el.className = 'message vl-item';
+    el.style.top = o[i] + 'px';
+    el.innerHTML = renderMsgHtml(msgs[i]);
+    vlInner.appendChild(el);
+    rendered.set(i, el);
+    const idx = i;
+    requestAnimationFrame(() => measureItem(idx, el));
+  }
+}
+
+vlViewport.addEventListener('scroll', scheduleRender);
+
+// ── Channel switching ────────────────────────────────────────────────────────
+function switchChannel(chId) {
+  if (!chId || !VDATA.messages[chId]) return;
+  document.querySelectorAll('.ch-link').forEach(a => a.classList.remove('active'));
+  const link = document.querySelector('.ch-link[data-ch-id="' + chId + '"]');
+  if (link) link.classList.add('active');
+  for (const [, el] of rendered) el.remove();
+  rendered.clear();
+  activeCh = chId;
+  if (!vlOffsets[chId]) buildOffsets(chId);
+  const msgs = VDATA.messages[chId];
+  const chInfo = VDATA.channels.find(c => c.id === chId);
+  document.getElementById('msg-channel-name').textContent = chInfo ? chInfo.name : chId;
+  document.getElementById('msg-channel-count').textContent = msgs.length.toLocaleString() + ' messages';
+  document.getElementById('msg-channel-header').style.display = '';
+  vlEmpty.style.display = 'none';
+  vlViewport.style.display = '';
+  vlInner.style.height = vlOffsets[chId][msgs.length] + 'px';
+  vlViewport.scrollTop = 0;
+  renderWindow();
+  document.getElementById('messages').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function jumpToIndex(chId, idx) {
+  if (chId !== activeCh) switchChannel(chId);
+  const o = vlOffsets[chId];
+  if (o) { vlViewport.scrollTop = o[idx]; renderWindow(); }
+}
+
+// ── Jump to date ─────────────────────────────────────────────────────────────
+function jumpToDate(dateStr) {
+  if (!activeCh || !dateStr) return;
+  const msgs = VDATA.messages[activeCh];
+  if (!msgs || !msgs.length) return;
+  let lo = 0, hi = msgs.length - 1, found = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (msgs[mid].ts.slice(0, 10) < dateStr) lo = mid + 1;
+    else { found = mid; hi = mid - 1; }
+  }
+  jumpToIndex(activeCh, found);
+}
+document.getElementById('jump-date-input').addEventListener('change', e => jumpToDate(e.target.value));
+
+// ── Collapsible categories ───────────────────────────────────────────────────
+function toggleCat(catId) {
+  const el = document.querySelector('.cat-section[data-cat-id="' + catId + '"]');
+  if (!el) return;
+  el.classList.toggle('collapsed');
+  try {
+    const s = JSON.parse(localStorage.getItem('vc_cats') || '{}');
+    s[catId] = el.classList.contains('collapsed');
+    localStorage.setItem('vc_cats', JSON.stringify(s));
+  } catch(e) {}
+}
+
+// ── Global search ────────────────────────────────────────────────────────────
+let searchTimer = null;
+function openSearch() {
+  document.getElementById('search-overlay').style.display = '';
+  setTimeout(() => document.getElementById('search-input').focus(), 50);
+}
+function closeSearch() { document.getElementById('search-overlay').style.display = 'none'; }
+document.getElementById('search-input').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => runSearch(e.target.value), 280);
+});
+function runSearch(q) {
+  const res = document.getElementById('search-results');
+  q = q.trim().toLowerCase();
+  if (q.length < 2) { res.innerHTML = '<div class="sr-empty">Type at least 2 characters…</div>'; return; }
+  let html = '', count = 0;
+  const MAX = 200;
+  outer: for (const ch of VDATA.channels) {
+    const msgs = VDATA.messages[ch.id];
+    if (!msgs) continue;
+    for (let i = 0; i < msgs.length; i++) {
+      const msg = msgs[i], u = VDATA.users[msg.uid] || {};
+      if (!(msg.c||'').toLowerCase().includes(q) && !(u.n||'').toLowerCase().includes(q)) continue;
+      count++;
+      html += '<div class="search-result" onclick="closeSearch();jumpToIndex(\'' + ch.id + '\',' + i + ')">'
+            + '<div class="sr-channel">#' + escapeHtml(ch.name) + '</div>'
+            + '<div><span class="sr-author">' + escapeHtml(u.n||'Unknown') + '</span>'
+            + '<span class="sr-ts">' + escapeHtml(msg.ts) + '</span></div>'
+            + '<div class="sr-content">' + escapeHtml((msg.c||'').slice(0, 140)) + '</div></div>';
+      if (count >= MAX) break outer;
+    }
+  }
+  if (!html) html = '<div class="sr-empty">No results found</div>';
+  else if (count >= MAX) html = '<div class="sr-empty">Showing first ' + MAX + ' results</div>' + html;
+  res.innerHTML = html;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSearch(); });
+
+// ── Members filter (pre-rendered) ────────────────────────────────────────────
 function filterMembers(q) {
   q = q.toLowerCase();
   document.querySelectorAll('.member-card').forEach(el => {
     el.style.display = el.dataset.name.includes(q) ? '' : 'none';
   });
 }
-function filterMessages(q) {
-  q = q.toLowerCase();
-  document.querySelectorAll('.message').forEach(el => {
-    const content = (el.dataset.content || '') + ' ' + (el.querySelector('.msg-author')?.textContent || '').toLowerCase();
-    el.style.display = content.includes(q) ? '' : 'none';
-  });
-}
+
+// ── Smooth scroll for section nav links ──────────────────────────────────────
 document.querySelectorAll('.nav-link[href^="#"]').forEach(a => {
   a.addEventListener('click', e => {
     e.preventDefault();
-    const target = document.querySelector(a.getAttribute('href'));
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const t = document.querySelector(a.getAttribute('href'));
+    if (t) t.scrollIntoView({behavior:'smooth', block:'start'});
   });
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    const s = JSON.parse(localStorage.getItem('vc_cats') || '{}');
+    for (const [catId, collapsed] of Object.entries(s)) {
+      if (collapsed) {
+        const el = document.querySelector('.cat-section[data-cat-id="' + catId + '"]');
+        if (el) el.classList.add('collapsed');
+      }
+    }
+  } catch(e) {}
+  const first = VDATA.channels.find(c => VDATA.messages[c.id] && VDATA.messages[c.id].length);
+  if (first) switchChannel(first.id);
 });
 </script>
 </body>
