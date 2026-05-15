@@ -1,8 +1,8 @@
-# VaultCord
+
 # Vaultcord
 
 <p align="center">
-  <img src="favicon.ico" width="96" alt="Vaultcord Logo">
+  <img src="vaultcordlogo.png" width="96" alt="Vaultcord Logo">
 </p>
 
 <p align="center">
