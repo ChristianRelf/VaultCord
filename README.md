@@ -89,13 +89,13 @@ pip install pyinstaller
 Build:
 
 ```bash
-python -m PyInstaller --onefile --clean --noupx --icon=favicon.ico --name vaultcord vaultcord.py
+python -m PyInstaller --onedir --clean --noupx --icon=favicon.ico --name vaultcord vaultcord.py
 ```
 
 The executable will appear in:
 
 ```text
-dist/vaultcord.exe
+dist/vaultcord/vaultcord.exe
 ```
 
 ---
