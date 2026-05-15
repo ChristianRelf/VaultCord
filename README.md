@@ -2,15 +2,12 @@
 # Vaultcord
 
 <p align="center">
-  <img src="vaultcordlogo.png" width="96" alt="Vaultcord Logo">
+  <img src="vaultcordlogo.png" width="246" alt="Vaultcord Logo">
 </p>
-
 <p align="center">
   <b>Discord Server Archive & Exporter</b><br>
   Export Discord servers into beautiful self-contained HTML archives.
 </p>
-
----
 
 ## Features
 
@@ -23,7 +20,6 @@
 - No external database required
 - Single-file portable executable support
 
----
 
 ## What Vaultcord Collects
 
