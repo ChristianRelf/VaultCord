@@ -1339,9 +1339,7 @@ body {{
 .msg-embed .embed-desc {{ color:var(--text-dim); }}
 
 /* Translation */
-.msg-translation {{ margin-top:5px; padding:6px 10px; background:rgba(91,192,222,0.08); border-left:2px solid var(--blue); border-radius:0 4px 4px 0; font-size:0.8rem; color:var(--text-dim); }}
-.msg-translation .tr-label {{ font-size:0.65rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--blue); margin-bottom:2px; }}
-.msg-translation .tr-text {{ color:var(--text); font-style:italic; white-space:pre-wrap; word-wrap:break-word; }}
+.msg-translation {{ margin-top:3px; font-size:0.85rem; color:var(--text-dim); white-space:pre-wrap; word-wrap:break-word; }}
 
 /* Emojis */
 .emoji-grid {{ display:flex; flex-wrap:wrap; gap:8px; }}
@@ -1572,9 +1570,7 @@ body {{
 
             tr = msg.get("_translation")
             if tr:
-                _ap(f'<div class="msg-translation"><div class="tr-label">🌐 Translated from '
-                    f'{escape(lang_name(msg.get("_detected_lang", "")))}</div>'
-                    f'<div class="tr-text">{escape(tr)}</div></div>')
+                _ap(f'<div class="msg-translation">(Translated from {escape(lang_name(msg.get("_detected_lang", "")))}:&#32;{escape(tr)})</div>')
 
             atts = msg.get("attachments")
             if atts:
