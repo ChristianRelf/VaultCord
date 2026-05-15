@@ -47,8 +47,7 @@ The generated archive is saved as a single HTML file that can be opened in any b
 Add screenshots here later.
 
 ```md
-![Overview](screenshots/overview.png)
-![Messages](screenshots/messages.png)
+
 ```
 
 ---
@@ -66,7 +65,7 @@ Add screenshots here later.
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/vaultcord.git
+git clone https://github.com/ChristianRelf/vaultcord.git
 cd vaultcord
 ```
 
@@ -89,7 +88,7 @@ pip install pyinstaller
 Build:
 
 ```bash
-python -m PyInstaller --onedir --clean --noupx --icon=favicon.ico --name vaultcord vaultcord.py
+python -m PyInstaller --onefile --clean --noupx --icon=favicon.ico --name vaultcord vaultcord.p
 ```
 
 The executable will appear in:
